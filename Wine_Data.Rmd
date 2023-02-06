@@ -291,4 +291,5 @@ wines_df %>% arrange(mmce.test.mean) %>% head(1) %>% select(1:2,)
 
 ### References
 
-* Book
+* Rhys, H. (2020). *Machine Learning with R, the tidyverse, and mlr.* Simon and
+Schuster. 536 p. ISBN: 1617296570
