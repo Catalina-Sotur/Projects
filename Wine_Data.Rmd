@@ -1,0 +1,294 @@
+---
+title: "Wine Data"
+author: "Catalina Soto"
+date: "Feb 2023"
+output: html_document
+---
+
+```{r, include = FALSE}
+# Loading packages
+library(ggplot2)
+library(tidyverse)
+library(GGally)
+library(mlr)
+library(mclust)
+library(dplyr)
+
+```
+
+## Initial Training 
+
+### 1.1 Initial summary
+
+We are going to start this analysis by providing some interesting information like:
+
+```{r}
+#Loading the data 
+data <- read.csv("WineData.csv")
+
+# Cleaning the data
+# The Key variable is going to be deleted because it provides information that is not needed
+wine_tib <- as_tibble(x = data)
+wine_tib <- select(wine_tib,-c("Key",))
+
+# Summary of the data
+summary(wine_tib)
+```
+
+Then, we will plot some variables to see how the data is behaving. 
+
+```{r}
+ggpairs(data = wine_tib,
+        mapping = aes(color = Region), 
+        columns = c("Alcohol", "Total_phenols", "Flavanoids", "Proanthocyanins"), 
+        diag = NULL)
+```
+
+
+On the lower part we can see the scatter plots of the chosen variables and on the upper part of the graph, we can see the general correlation values between the two variables. As we are color coding the data by Region, R is also providing the correlation values for each region on every plot. 
+
+### 1.2 Examining the data 
+
+On examining the data, are there variables or features that might have much larger, or smaller values than others? 
+
+*Yes, it totally depends on the characteristics of each variable, and of each data set. If we want to compare one small value variable against a big value one in the same plot, the proportion is not going to even make sense.*
+
+What action may be considered in cases of large differences in values.
+
+*The process is called standardization. It allows the variables values to be on the same scale, so they can be compared fairly*
+
+### 1.3 Train a KNN Model 
+
+We are going to train a kNN model, using k = 7, to predict the Region of an unknown bottle of wine
+
+
+```{r}
+# Define the task 
+wine_task <- makeClassifTask(data = wine_tib, 
+                             target = "Region")
+
+# Define the learner
+wine_knn <- makeLearner(cl = "classif.knn", 
+                        par.vals = list("k" = 7))
+
+# Define the model 
+wine_knn_model <- train(learner = wine_knn, 
+                        task = wine_task)
+
+# Test the performance
+wine_knnPred <- predict(object = wine_knn_model, 
+                        newdata = wine_tib)
+```
+
+The performance measures:
+```{r}
+performance(pred = wine_knnPred, 
+            measures = list(mmce, acc))
+```
+
+Then, we are going to compute the three most common types of cross-validation:
+
+* Holdout CV
+
+```{r}
+# We are choosing to split 70% our data for the train set and 30% for the test set
+
+wine_holdout <- makeResampleDesc(method = "Holdout", 
+                                 split = 0.7, 
+                                 stratify = TRUE)
+
+wine_holdoutCV <- resample(learner = wine_knn, 
+                           task = wine_task, 
+                           resampling = wine_holdout,
+                           measures = list(mmce, acc))
+```
+
+Averages of the mmce and accuracy:
+```{r}
+wine_holdoutCV$aggr
+```
+
+The confusion matrix is:
+```{r}
+calculateConfusionMatrix(pred = wine_holdoutCV$pred, 
+                         relative = FALSE)
+```
+
+* Repeated K-fold
+
+```{r}
+wine_kFold <- makeResampleDesc(method = "RepCV", 
+                               folds = 10, 
+                               reps = 8, 
+                               stratify = TRUE)
+
+wine_kFold_CV <- resample(learner = wine_knn, 
+                          task = wine_task,
+                          resampling = wine_kFold, 
+                          measures = list(mmce, acc))
+```
+
+Averages of the mmce and accuracy:
+```{r}
+wine_kFold_CV$aggr
+```
+
+The confusion matrix is:
+```{r}
+calculateConfusionMatrix(pred = wine_kFold_CV$pred, 
+                         relative = FALSE)
+```
+
+* Leave One Out
+
+```{r}
+wine_LOO <- makeResampleDesc(method = "LOO")
+
+wine_LOO_CV <- resample(learner = wine_knn, 
+                        task = wine_task, 
+                        resampling = wine_LOO, 
+                        measures = list(mmce, acc))
+```
+
+Averages of mmce and accuracy:
+```{r}
+wine_LOO_CV$aggr
+```
+
+The confusion matrix is:
+```{r}
+calculateConfusionMatrix(pred = wine_LOO_CV$pred, 
+                         relative = FALSE)
+```
+
+The cross validation that had the lower accuracy score was the holdout. As the model is being created every time this file is knitted, it is hard to be right on which model has the highest accuracy. Usually in all of the times that I ran the code, the accuracy of the leave-one-out method and the repeated K-fold one, didn't go beyond 70% of accuracy.
+
+
+## Hyperparameter Tuning
+
+### 2.1
+Define a set of values of k from 3 to 23, to prepare for hyper parameter tuning.
+
+```{r}
+wine_knn_ParamSpace <- makeParamSet(makeDiscreteParam("k", values = 3:23))
+```
+
+### 2.2
+
+Tune your model, to select an optimal value of k for the kNN model.
+
+```{r}
+gridSearch <- makeTuneControlGrid()
+
+wine_CV_ForTuning <- makeResampleDesc(method = "RepCV", 
+                                      folds = 10, 
+                                      reps = 8)
+
+wine_tunedK <- tuneParams(learner = "classif.knn", 
+                          task = wine_task, 
+                          resampling = wine_CV_ForTuning,
+                          par.set = wine_knn_ParamSpace, 
+                          control = gridSearch)
+
+wine_knn_TuningData <- generateHyperParsEffectData(tune.result = wine_tunedK)
+```
+
+```{r}
+gridSearch <- makeTuneControlGrid()
+
+wine_CV_ForTuning <- makeResampleDesc(method = "RepCV", 
+                                      folds = 10, 
+                                      reps = 8)
+
+wine_tunedK <- tuneParams(learner = "classif.knn", 
+                          task = wine_task, 
+                          resampling = wine_CV_ForTuning,
+                          par.set = wine_knn_ParamSpace, 
+                          control = gridSearch)
+
+wine_knn_TuningData <- generateHyperParsEffectData(tune.result = wine_tunedK)
+```
+
+The optimal value of k is:
+```{r}
+wine_tunedK$x
+```
+
+```{r}
+#Training final model with the tuned K 
+wine_tunedKnn <- setHyperPars(makeLearner("classif.knn"),
+                              par.vals = wine_tunedK$x)
+wine_tunedKnnModel <- train(learner = wine_tunedKnn, 
+                            task = wine_task)
+```
+
+### 2.3
+```{r}
+plotHyperParsEffect(hyperpars.effect.data = wine_knn_TuningData, 
+                    x = "k", 
+                    y = "mmce.test.mean", 
+                    plot.type = "line") +
+  theme_classic() +
+  labs (title = "mmce vs. k")
+```
+
+## Deploying our model
+
+### 3.1
+
+Finally, we used the trained model with the tuned k to classify a new set of unlabeled data:
+
+```{r}
+data2 <- read.csv(file = "NewWines.csv")
+new_wine_tib <- as_tibble(x = data2)
+new_wine_Pred <- predict(object = wine_tunedKnnModel, 
+                         newdata = new_wine_tib)
+```
+
+The prediction responses are:
+```{r}
+getPredictionResponse(pred = new_wine_Pred)
+```
+
+## Bonus work 
+
+### 4.1
+
+Select a k that minimizes the mmce. Fully explain what is being done, and why this approach is actually optimal.
+
+First we need to create the conditions of our inner and outer loops. We will work with a inner cross validation loop nested in a repeated cross validation on the outer loop. 
+
+Then we are going to take learner and put it into the wrapper, along with the resampling criteria, the already designated range of the k values. All of those values are going to represent what the wrapped inner loop is going to doing. Next, we are going to run the nested cross validation process.
+
+After all the analysis is done, we are going to get a variable with all the data from every iteration for every k value, along with the mmce.test.mean. 
+
+```{r}
+inner <- makeResampleDesc("CV")
+
+outer <- makeResampleDesc("RepCV", 
+                          folds = 10, 
+                          reps = 5)
+
+wine_knnWrapper <- makeTuneWrapper(learner ="classif.knn", 
+                                   resampling = inner, 
+                                   par.set = wine_knn_ParamSpace,
+                                   control = gridSearch)
+
+CV_WithTuning <- resample(learner = wine_knnWrapper,
+                          task = wine_task, 
+                          resampling = outer, 
+                          extract = getTuneResult)
+
+wine_best_kTuned <- generateHyperParsEffectData(tune.result = CV_WithTuning)
+
+wines_df <- as.data.frame(x = wine_best_kTuned$data)
+```
+
+The best k value that minimizes the mmce for this project is:
+```{r}
+wines_df %>% arrange(mmce.test.mean) %>% head(1) %>% select(1:2,)
+```
+
+### References
+
+* Book
